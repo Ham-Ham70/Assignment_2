@@ -1,0 +1,151 @@
+# Secret Identity — observability stack
+# ES/Kibana auth is off on purpose for local classroom use only.
+
+networks:
+  monitoring:
+    driver: bridge
+
+volumes:
+  esdata:
+  filebeat-data:
+  prometheus-data:
+
+services:
+  app:
+    build: .
+    container_name: secret-identity-app
+    ports:
+      - "8000:8000"
+      - "50051:50051"
+      - "9091:9091"
+    environment:
+      - PORT=8000
+      - LOG_LEVEL=info
+      # "1" only while running the cardinality experiment
+      - ENABLE_CARDINALITY_LABEL=${ENABLE_CARDINALITY_LABEL:-0}
+    labels:
+      co.elastic.logs/enabled: "true"
+    networks:
+      - monitoring
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:8000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:v2.48.0
+    container_name: prometheus
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    ports:
+      - "9090:9090"
+    networks:
+      - monitoring
+    depends_on:
+      app:
+        condition: service_healthy
+    restart: unless-stopped
+
+  node-exporter:
+    # Scrapes the Docker Desktop Linux VM (labeled machine=docker-desktop-linux-vm).
+    image: prom/node-exporter:v1.7.0
+    container_name: node-exporter
+    command:
+      - "--path.procfs=/host/proc"
+      - "--path.sysfs=/host/sys"
+      - "--path.rootfs=/host"
+      - "--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)"
+    pid: host
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/host:ro
+    networks:
+      - monitoring
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:10.2.0
+    container_name: grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_DASHBOARDS_MIN_REFRESH_INTERVAL=5s
+    volumes:
+      - ./grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    networks:
+      - monitoring
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.15.0
+    container_name: elasticsearch
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - xpack.license.self_generated.type=basic
+      - ES_JAVA_OPTS=-Xms512m -Xmx512m
+    ports:
+      - "9200:9200"
+    volumes:
+      - esdata:/usr/share/elasticsearch/data
+    networks:
+      - monitoring
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:9200/_cluster/health >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 40s
+    restart: unless-stopped
+
+  filebeat:
+    image: docker.elastic.co/beats/filebeat:8.15.0
+    container_name: filebeat
+    user: root
+    command: ["filebeat", "-e", "--strict.perms=false"]
+    volumes:
+      - ./filebeat/filebeat.yml:/usr/share/filebeat/filebeat.yml:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - filebeat-data:/usr/share/filebeat/data
+    networks:
+      - monitoring
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+      app:
+        condition: service_healthy
+    restart: unless-stopped
+
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.15.0
+    container_name: kibana
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+      - XPACK_SECURITY_ENABLED=false
+      - TELEMETRY_ENABLED=false
+    ports:
+      - "5601:5601"
+    networks:
+      - monitoring
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    restart: unless-stopped

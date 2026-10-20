@@ -1,0 +1,566 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Assignment 2: HTTP APIs, gRPC, and Metrics — Syed Hamza Omer (08962)</title>
+<style>
+  @page { size: A4; margin: 14mm 12mm; }
+  * { box-sizing: border-box; }
+  body {
+    font-family: "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    font-size: 10.5pt;
+    line-height: 1.45;
+    color: #1f2328;
+    background: #fff;
+    max-width: 920px;
+    margin: 0 auto;
+    padding: 28px 18px 56px;
+  }
+  h1 {
+    font-size: 20pt;
+    margin: 0 0 8px;
+    color: #123a8a;
+    border-bottom: 2px solid #eaecef;
+    padding-bottom: 8px;
+  }
+  h2 {
+    font-size: 14pt;
+    margin: 26px 0 10px;
+    padding-bottom: 4px;
+    border-bottom: 1px solid #d0d7de;
+    page-break-after: avoid;
+  }
+  h3 {
+    font-size: 12pt;
+    margin: 18px 0 8px;
+    page-break-after: avoid;
+  }
+  p { margin: 0 0 10px; }
+  ul, ol { margin: 0 0 10px; padding-left: 22px; }
+  li { margin-bottom: 3px; }
+  em { color: #424a53; }
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 12px 0 18px;
+    font-size: 9.5pt;
+  }
+  th, td {
+    border: 1px solid #d0d7de;
+    padding: 6px 8px;
+    vertical-align: top;
+    text-align: left;
+  }
+  th { background: #f6f8fa; }
+  code, pre {
+    font-family: Consolas, "SF Mono", Menlo, monospace;
+    font-size: 8.8pt;
+  }
+  code {
+    background: rgba(175, 184, 193, 0.2);
+    padding: 1px 4px;
+    border-radius: 4px;
+  }
+  pre {
+    background: #f6f8fa;
+    border: 1px solid #d0d7de;
+    border-radius: 6px;
+    padding: 10px 12px;
+    overflow-x: auto;
+    white-space: pre-wrap;
+    margin: 10px 0 14px;
+  }
+  pre code { background: transparent; padding: 0; }
+  img.figure {
+    display: block;
+    max-width: 100%;
+    height: auto;
+    margin: 8px 0 4px;
+    border: 1px solid #d0d7de;
+    border-radius: 4px;
+    page-break-inside: avoid;
+  }
+  p:has(img.figure) {
+    page-break-inside: avoid;
+    margin-bottom: 4px;
+  }
+  p em {
+    display: block;
+    font-size: 9.2pt;
+    margin: 0 0 16px;
+  }
+  @media print {
+    body { max-width: 100%; padding: 0; }
+    h1, h2, h3, img.figure, table { page-break-inside: avoid; }
+  }
+</style>
+</head>
+<body>
+<h1>Assignment 2 — HTTP APIs, gRPC, and Metrics</h1>
+<p><strong>Secret Identity</strong><br />
+Enterprise Software Development, Fall 2026</p>
+<p><strong>Name:</strong> Syed Hamza Omer<br />
+<strong>Student ID:</strong> 08962</p>
+<p>This is the same DC guessing game from Assignment 1. Players still try to name the secret character in eight guesses. This round I cleaned up the HTTP API, added a gRPC twin of the same game logic, and filled the metric gaps that showed up once a second protocol was in the mix.</p>
+<pre><code class="language-bash">docker compose up -d --build
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>What</th>
+<th>Where</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Game UI</td>
+<td>http://localhost:8000</td>
+</tr>
+<tr>
+<td>OpenAPI / Swagger</td>
+<td>http://localhost:8000/api/docs</td>
+</tr>
+<tr>
+<td>Spec file</td>
+<td>http://localhost:8000/openapi.yaml</td>
+</tr>
+<tr>
+<td>gRPC</td>
+<td><code>localhost:50051</code></td>
+</tr>
+<tr>
+<td>gRPC metrics</td>
+<td>http://localhost:9091/metrics</td>
+</tr>
+<tr>
+<td>Prometheus targets</td>
+<td>http://localhost:9090/targets</td>
+</tr>
+<tr>
+<td>Grafana</td>
+<td>http://localhost:3000 (<code>admin</code> / <code>admin</code>)</td>
+</tr>
+</tbody>
+</table>
+<pre><code class="language-bash">python scripts/test_http_api.py
+python scripts/test_rate_limit.py
+python scripts/http_caller.py
+python scripts/grpc_caller.py 5
+</code></pre>
+<hr />
+<h2>Part A — Improve the HTTP API</h2>
+<h3>REST table</h3>
+<table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Route</th>
+<th>Inputs</th>
+<th>Success / errors</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>GET</code></td>
+<td><code>/api/health</code></td>
+<td>—</td>
+<td><code>200</code></td>
+<td>Liveness check. Unchanged from A1.</td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/api/characters</code></td>
+<td>—</td>
+<td><code>200</code></td>
+<td>43 names. Read-only, so repeats are already safe.</td>
+</tr>
+<tr>
+<td><code>POST</code></td>
+<td><code>/api/games</code></td>
+<td>optional <code>Idempotency-Key</code></td>
+<td><code>201</code> new, <code>200</code> replay</td>
+<td>Same key returns the same <code>game_id</code>.</td>
+</tr>
+<tr>
+<td><code>POST</code></td>
+<td><code>/api/games/{gameId}/guesses</code></td>
+<td>body <code>{"name":"..."}</code>, optional <code>Idempotency-Key</code></td>
+<td><code>200</code>, <code>400</code>, <code>404</code>, <code>409</code>, <code>429</code></td>
+<td>Main change this assignment.</td>
+</tr>
+<tr>
+<td><code>POST</code></td>
+<td><code>/api/games/{gameId}/guess</code></td>
+<td>same</td>
+<td>same</td>
+<td>A1 alias so old callers still work.</td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/api/games/{gameId}</code></td>
+<td>path id</td>
+<td><code>200</code>, <code>404</code></td>
+<td>Status, guesses used, turns left.</td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/openapi.yaml</code></td>
+<td>—</td>
+<td><code>200</code></td>
+<td>The spec itself.</td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/api/docs</code></td>
+<td>—</td>
+<td><code>200</code></td>
+<td>Swagger UI over that spec.</td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/metrics</code></td>
+<td>—</td>
+<td><code>200</code></td>
+<td>HTTP Prometheus scrape.</td>
+</tr>
+<tr>
+<td><code>POST</code></td>
+<td><code>/chaos/delay</code>, <code>/chaos/reset</code></td>
+<td>query <code>every</code>, <code>ms</code></td>
+<td><code>200</code>, <code>400</code></td>
+<td>Used to force timeouts for the caller demo. Left as lab tools.</td>
+</tr>
+</tbody>
+</table>
+<p>Chaos, <code>/metrics</code>, and <code>/api/demo/hit</code> are A1 leftovers. I did not redesign them.</p>
+<h3>OpenAPI (three sentences)</h3>
+<p><code>openapi.yaml</code> is an OpenAPI 3.0.3 document for the HTTP routes above: path params, JSON bodies, success payloads, and the error codes I actually return (<code>400</code>, <code>404</code>, <code>409</code>, <code>429</code>). The app serves that file at <code>/openapi.yaml</code> and loads it in Swagger UI at <code>/api/docs</code>, so I can click an operation instead of reconstructing curl by hand. I used it to try <code>POST /api/games/{gameId}/guesses</code> in the browser — fill <code>gameId</code>, send <code>{"name":"Batman"}</code>, and read the clue object plus the <code>Idempotent-Replayed</code> / rate-limit headers.</p>
+<p><img class="figure" alt="Swagger lists the HTTP operations, including health, characters, games, guesses, metrics, and the chaos helpers." src="report-assets/swagger-endpoint-list.png" /></p>
+<p><em>Figure 1. Swagger UI at <code>/api/docs</code>, generated from <code>openapi.yaml</code>.</em></p>
+<p><img class="figure" alt="Try-it form for POST /api/games/{gameId}/guesses with gameId and a Batman JSON body." src="report-assets/swagger-try-guess.png" /></p>
+<p><em>Figure 2. Trying a guess from the spec. <code>Idempotency-Key</code> is an optional header on the same operation.</em></p>
+<p><img class="figure" alt="Successful guess response in Swagger: Batman feedback JSON and documented response headers." src="report-assets/swagger-guess-response.png" /></p>
+<p><em>Figure 3. Live <code>200</code> from that try-it call. The spec also documents <code>Idempotent-Replayed</code> and the <code>X-RateLimit-*</code> headers.</em></p>
+<h3>Before / after: submitting a guess</h3>
+<p>The user task I picked is <strong>submit a character guess in an active game</strong>.</p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>Assignment 1</th>
+<th>Assignment 2</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Old / new endpoint</strong></td>
+<td><code>POST /api/games/:gameId/guess</code></td>
+<td><code>POST /api/games/:gameId/guesses</code> (legacy <code>/guess</code> still mapped)</td>
+</tr>
+<tr>
+<td><strong>Problem</strong></td>
+<td>Singular URI; a dropped response plus a retry looked like a second guess (<code>400 You already guessed that character</code>); no throttle, so a script could burn through the 43-name roster.</td>
+<td>Collection URI; <code>Idempotency-Key</code> replays cached feedback and does not spend a turn; 5 calls / 10s per IP, then <code>429</code> + <code>Retry-After</code>.</td>
+</tr>
+<tr>
+<td><strong>Change</strong></td>
+<td>One POST that always mutated.</td>
+<td>Same judging code, plus a key cache, a sliding window, and headers that tell the caller what happened.</td>
+</tr>
+<tr>
+<td><strong>Reason</strong></td>
+<td>Guesses are the write that actually costs a turn. That is the call a flaky client will retry, and the one worth rate-limiting.</td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<p><strong>Other endpoints</strong></p>
+<ul>
+<li><code>POST /api/games</code> — also takes <code>Idempotency-Key</code>. A retry should not spawn a second secret.</li>
+<li><code>GET /api/games/:gameId</code> — added so you can inspect a session without guessing.</li>
+<li><code>GET /api/characters</code>, <code>GET /api/health</code> — left alone. GETs with no body.</li>
+<li><code>/chaos/*</code>, <code>/metrics</code>, <code>/api/demo/hit</code> — left alone. Lab / A1 surfaces.</li>
+</ul>
+<p><strong>Callers I had to touch</strong></p>
+<ul>
+<li>Browser client (<code>app/static/index.html</code>) now posts to <code>/guesses</code> and sends a UUID <code>Idempotency-Key</code> on start-game and guess.</li>
+<li><code>scripts/load.js</code> hits <code>/guesses</code> and treats <code>200</code>/<code>201</code> as success.</li>
+<li>New Python caller: <code>scripts/http_caller.py</code> (below).</li>
+</ul>
+<h3>Idempotency</h3>
+<p><code>POST /api/games</code> and <code>POST /api/games/:id/guesses</code> are the retries that would duplicate work.</p>
+<p>The client sends <code>Idempotency-Key</code>. The engine stores the response against that key (<code>app/game-engine.js</code>). The next POST with the same key returns the cached body and <code>Idempotent-Replayed: true</code>. Guesses_left does not drop.</p>
+<p>Repeating the same character name in one session is also treated as a replay even without a key, because that used to be the exact A1 failure mode after a timeout.</p>
+<h3>Rate limiting</h3>
+<ul>
+<li><strong>Limit:</strong> 5 requests in a 10 second sliding window.</li>
+<li><strong>Who shares it:</strong> one bucket per client IP, in this process only (single instance is enough for the brief).</li>
+<li><strong>When you may call again:</strong> <code>429 Too Many Requests</code> with <code>Retry-After</code> set to how many seconds until the oldest stamp in the window ages out. <code>X-RateLimit-Limit</code>, <code>X-RateLimit-Remaining</code>, and <code>X-RateLimit-Reset</code> go out on both allowed and blocked responses.</li>
+</ul>
+<p>I ran this separately from the circuit-breaker demo, as asked (<code>python scripts/test_rate_limit.py</code>).</p>
+<p><img class="figure" alt="Terminal output of five rapid guesses. Remaining quota falls 4, 3, 2, 1, 0. Rate-limit headers are present on every response." src="report-assets/rate-limit-accepted-requests.png" /></p>
+<p><em>Figure 4. Accepted guesses on <code>POST /api/games/{id}/guesses</code>. Remaining quota counts down. Request 5 landed on a finished game (<code>409</code>) after a lucky correct guess, so the remaining counter is already 0; the next burst is what Grafana records as <code>429</code> (Figure 11).</em></p>
+<p>The automated API suite also hit the cap while checking the <code>/guess</code> alias and waited on <code>Retry-After</code> (~10.5s) before continuing:</p>
+<p><img class="figure" alt="HTTP API test suite: 12/12 passed, including valid start/guess, idempotent repeats, 400/404 invalid input, and a wait for rate-limit reset." src="report-assets/http-api-tests.png" /></p>
+<p><em>Figure 5. Valid request, invalid input (<code>400</code> unknown character, empty body, <code>404</code> missing game), and a repeated start/guess with the same key. The “Waiting 10.5s” line is the <code>429</code> path.</em></p>
+<h3>Tests I ran on HTTP</h3>
+<table>
+<thead>
+<tr>
+<th>Case</th>
+<th>What I sent</th>
+<th>Result</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Valid</td>
+<td><code>POST /api/games</code>, then guess <code>Batman</code></td>
+<td><code>201</code> / <code>200</code>, clues, guesses_left 7</td>
+</tr>
+<tr>
+<td>Invalid</td>
+<td><code>Thanos-Marvel</code>, empty body, fake game id</td>
+<td><code>400</code>, <code>400</code>, <code>404</code></td>
+</tr>
+<tr>
+<td>Repeat</td>
+<td>same <code>Idempotency-Key</code> on start and on guess</td>
+<td>same <code>game_id</code>; guess replayed; guesses_left unchanged</td>
+</tr>
+</tbody>
+</table>
+<h3>Python HTTP caller</h3>
+<p><code>scripts/http_caller.py</code> is a client, not another server. One run makes several calls with:</p>
+<table>
+<thead>
+<tr>
+<th>Setting</th>
+<th>Value</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Timeout</td>
+<td><strong>1.0 s</strong> per attempt</td>
+</tr>
+<tr>
+<td>Retries</td>
+<td><strong>3</strong> extra attempts on timeout / connection error / HTTP 5xx</td>
+</tr>
+<tr>
+<td>Backoff</td>
+<td>0.2 s, 0.4 s, 0.8 s</td>
+</tr>
+<tr>
+<td>Breaker trip</td>
+<td><strong>3</strong> consecutive exhausted calls</td>
+</tr>
+<tr>
+<td>Recovery</td>
+<td><strong>3.0 s</strong> closed-to-traffic, then one HALF_OPEN probe</td>
+</tr>
+</tbody>
+</table>
+<p>Retries reuse the same <code>Idempotency-Key</code>, so a late server response cannot spend extra turns.</p>
+<p>I did <strong>not</strong> use rate limiting for this demo. Timeouts come from <code>POST /chaos/delay?every=1&amp;ms=2000</code> (2 s delay vs 1 s timeout).</p>
+<p><strong>Phase 1 — success, breaker CLOSED</strong></p>
+<p><img class="figure" alt="Caller starts a game (HTTP 201), guesses Batman (200), then repeats the same Idempotency-Key and gets Idempotent-Replayed true." src="report-assets/caller-phase1-success.png" /></p>
+<p><em>Figure 6. Happy path. The repeated guess is served from cache (<code>Idempotent-Replayed: true</code>). Timeout and breaker settings are printed at the top.</em></p>
+<p><strong>Phase 2 — timeout, backoff, trip to OPEN</strong></p>
+<p><img class="figure" alt="Chaos delay 2000ms. Each call does four attempts that ReadTimeout after ~1s, backing off 0.20s, 0.40s, 0.80s. After the third exhausted call the breaker trips CLOSED to OPEN." src="report-assets/caller-phase2-retries.png" /></p>
+<p><em>Figure 7. Three logical calls, each with retries. Consecutive failures 1/3, 2/3, then trip.</em></p>
+<p><strong>Phase 3 — block while OPEN; Phase 4 starts recovery</strong></p>
+<p><img class="figure" alt="Call 3 trips the breaker. Two later attempts are BLOCKED with FAST-FAIL and no network call. Chaos is cleared and the script sleeps 3.5s." src="report-assets/caller-breaker-open-and-recovery.png" /></p>
+<p><em>Figure 8. While OPEN the caller refuses work locally. After cooldown it will probe once.</em></p>
+<p><strong>Phase 4 — HALF_OPEN probe, back to CLOSED</strong></p>
+<p><img class="figure" alt="Trial probe transitions OPEN to HALF_OPEN, POST guesses returns HTTP 200 in 16.7ms, breaker returns to CLOSED. Demo complete." src="report-assets/caller-phase4-closed.png" /></p>
+<p><em>Figure 9. Probe succeeds, breaker closes. All four phases in one run.</em></p>
+<hr />
+<h2>Part B — gRPC service and metrics</h2>
+<h3>What I kept, what was missing</h3>
+<p>I did not redo the A1 “four metric types” exercise. This is only an audit of what that HTTP setup could not see once gRPC existed.</p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>A1</th>
+<th>A2</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Still useful</td>
+<td><code>http_requests_total</code>, <code>http_request_duration_seconds</code>, <code>games_active</code>, win/loss counters</td>
+<td>Left in place. Old Grafana boards still work.</td>
+</tr>
+<tr>
+<td>Missing</td>
+<td>No RPC method/status, no 429 counter, no replay counter, no in-flight view, no payload size</td>
+<td>Added on the gRPC registry (<code>:9091</code>) and two HTTP counters</td>
+</tr>
+<tr>
+<td>Fix / add</td>
+<td>—</td>
+<td><code>grpc_server_handled_total</code>, <code>grpc_server_handling_seconds</code>, <code>grpc_server_in_flight_requests</code>, message-size histograms, plus <code>http_rate_limit_hits_total</code> / <code>*_idempotency_hits_total</code></td>
+</tr>
+</tbody>
+</table>
+<h3>Service and <code>.proto</code></h3>
+<p><code>proto/game.proto</code> defines <code>SecretIdentityService</code> with <code>GetCharacters</code>, <code>StartGame</code>, <code>MakeGuess</code>, and <code>GetGameStatus</code>. HTTP and gRPC share <code>app/game-engine.js</code>, so a guess is judged once.</p>
+<p>Generate Python stubs:</p>
+<pre><code class="language-bash">python -m grpc_tools.protoc -I. --python_out=. --grpc_python_out=. proto/game.proto
+</code></pre>
+<p>That writes <code>proto/game_pb2.py</code> and <code>proto/game_pb2_grpc.py</code>. <code>scripts/grpc_caller.py</code> uses those stubs. It is the Python gRPC client; it does not expose Prometheus (not required).</p>
+<p>Five cycles of mixed OK / <code>INVALID_ARGUMENT</code> / <code>NOT_FOUND</code> calls populate the boards:</p>
+<pre><code class="language-bash">python scripts/grpc_caller.py 5
+</code></pre>
+<h3>Prometheus scrape</h3>
+<p><code>prometheus/prometheus.yml</code> has a second job:</p>
+<pre><code class="language-yaml">- job_name: secret-identity-grpc
+  static_configs:
+    - targets: [&quot;app:9091&quot;]
+</code></pre>
+<p>HTTP stays on <code>app:8000</code>. Both were <code>UP</code>:</p>
+<p><img class="figure" alt="Prometheus status page: node, prometheus, secret-identity (app:8000) and secret-identity-grpc (app:9091) all UP." src="report-assets/prometheus-targets-up.png" /></p>
+<p><em>Figure 10. Prometheus scraping the HTTP app and the gRPC metrics process.</em></p>
+<h3>New metrics</h3>
+<p>Duration is measured <strong>on the server</strong>, inside <code>measureAndExecute</code> in <code>app/grpc-server.js</code>, around the handler. That is handler time, not client RTT.</p>
+<p>I used <strong>in-flight calls</strong> as the saturation signal (<code>grpc_server_in_flight_requests</code>). If calls sit in the process, this gauge moves; a lone latency quantile can hide that. I still recorded message size because GetCharacters is obviously larger than MakeGuess, and the brief allows either metric.</p>
+<p>Labels stay small: service name, four method names, a handful of gRPC codes, HTTP route templates. No user, game, request, or trace ids on series.</p>
+<table>
+<thead>
+<tr>
+<th>Metric</th>
+<th>Purpose</th>
+<th>Type</th>
+<th>Unit</th>
+<th>Labels</th>
+<th>Code</th>
+<th>Query</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>grpc_server_handled_total</code></td>
+<td>Volume and errors by method/status</td>
+<td>counter</td>
+<td>calls</td>
+<td><code>grpc_service</code>, <code>grpc_method</code>, <code>grpc_code</code></td>
+<td><code>app/grpc-metrics.js</code>, incremented in <code>app/grpc-server.js</code></td>
+<td><code>sum by (grpc_method, grpc_code) (rate(grpc_server_handled_total[1m]))</code></td>
+</tr>
+<tr>
+<td><code>grpc_server_handling_seconds</code></td>
+<td>Latency histogram (p50 / p95)</td>
+<td>histogram</td>
+<td>seconds</td>
+<td><code>grpc_service</code>, <code>grpc_method</code></td>
+<td>same</td>
+<td><code>histogram_quantile(0.95, sum by (le, grpc_method) (rate(grpc_server_handling_seconds_bucket[5m])))</code></td>
+</tr>
+<tr>
+<td><code>grpc_server_in_flight_requests</code></td>
+<td>Concurrent RPCs</td>
+<td>gauge</td>
+<td>requests</td>
+<td><code>grpc_service</code>, <code>grpc_method</code></td>
+<td>inc/dec around each handler</td>
+<td><code>sum by (grpc_method) (grpc_server_in_flight_requests)</code></td>
+</tr>
+<tr>
+<td><code>grpc_server_msg_received_bytes</code> / <code>_sent_bytes</code></td>
+<td>Payload size</td>
+<td>histogram</td>
+<td>bytes</td>
+<td><code>grpc_service</code>, <code>grpc_method</code></td>
+<td>same wrapper</td>
+<td><code>histogram_quantile(0.95, sum by (le, grpc_method) (rate(grpc_server_msg_sent_bytes_bucket[5m])))</code></td>
+</tr>
+<tr>
+<td><code>grpc_idempotency_hits_total</code></td>
+<td>Replays on the gRPC path</td>
+<td>counter</td>
+<td>hits</td>
+<td><code>grpc_service</code>, <code>grpc_method</code></td>
+<td><code>StartGame</code> / <code>MakeGuess</code></td>
+<td><code>sum by (grpc_method) (rate(grpc_idempotency_hits_total[1m]))</code></td>
+</tr>
+<tr>
+<td><code>http_rate_limit_hits_total</code></td>
+<td>HTTP <code>429</code>s</td>
+<td>counter</td>
+<td>hits</td>
+<td><code>route</code></td>
+<td><code>app/server.js</code> <code>checkRateLimit</code></td>
+<td><code>sum by (route) (rate(http_rate_limit_hits_total[1m]))</code></td>
+</tr>
+<tr>
+<td><code>http_idempotency_hits_total</code></td>
+<td>HTTP replays</td>
+<td>counter</td>
+<td>hits</td>
+<td><code>route</code></td>
+<td>guess / start handlers</td>
+<td><code>sum by (route) (rate(http_idempotency_hits_total[1m]))</code></td>
+</tr>
+</tbody>
+</table>
+<p>Histogram buckets for RPC time: <code>0.001 … 2.5</code> seconds. Message size: <code>32 … 4096</code> bytes.</p>
+<h3>Dashboard (HTTP beside gRPC)</h3>
+<p>Grafana dashboard <code>grafana/dashboards/secret-identity-grpc-comparison.json</code>, time window on the panels: <strong>5 minutes</strong> for quantiles, <strong>1 minute</strong> for rates.</p>
+<p><strong>Calls and errors, side by side</strong></p>
+<p><img class="figure" alt="Four Grafana panels: HTTP request volume by route, gRPC call volume by method, HTTP non-2xx including 429, gRPC errors by method and status (ALREADY_EXISTS, FAILED_PRECONDITION)." src="report-assets/grafana-volume-errors.png" /></p>
+<p><em>Figure 11. Left: HTTP. Right: gRPC. The HTTP error panel is the <code>429</code> spike from the rate-limit run. gRPC errors are the expected <code>INVALID_ARGUMENT</code> / <code>NOT_FOUND</code> / <code>FAILED_PRECONDITION</code> calls from <code>grpc_caller.py</code>.</em></p>
+<p><strong>Duration p50 / p95, 429s, in-flight</strong></p>
+<p><img class="figure" alt="HTTP duration p50/p95 (chaos delay visible near 2s on /api/docs and /guesses), gRPC duration around 1ms, HTTP 429 and idempotency hits, gRPC in-flight gauges at 0 after traffic." src="report-assets/grafana-latency-ratelimit-inflight.png" /></p>
+<p><em>Figure 12. p50 and p95 over a 5 minute window. The ~2 s HTTP bump is the chaos delay used for the breaker demo, not normal guess time. gRPC handler p95 stays under a millisecond here. Bottom-left is the 429 / replay series; bottom-right is in-flight (idle after the burst) plus replay hits.</em></p>
+<p><strong>Message size (extra panel)</strong></p>
+<p><img class="figure" alt="gRPC message payload size p95: GetCharacters sent bytes around 4 KiB, other methods much smaller." src="report-assets/grafana-grpc-payload-size.png" /></p>
+<p><em>Figure 13. GetCharacters responses sit near 4 KiB; StartGame / MakeGuess stay tiny. That is why I kept size as a second panel even though in-flight is the saturation metric I would actually alert on.</em></p>
+<hr />
+<h2>Call path</h2>
+<pre><code>Browser  or  python scripts/http_caller.py
+        |  HTTP :8000
+        v
+Express  -&gt; rate limit (guesses) -&gt; idempotency cache -&gt; game engine
+        |
+        +-&gt; /metrics          Prometheus job secret-identity
+        +-&gt; /chaos/delay      (timeout demo only)
+
+python scripts/grpc_caller.py
+        |  gRPC :50051
+        v
+SecretIdentityService  -&gt; same game engine
+        |
+        +-&gt; metrics HTTP :9091   Prometheus job secret-identity-grpc
+
+Prometheus -&gt; Grafana (HTTP panels | gRPC panels)
+</code></pre>
+<p>Both protocols end in the same in-memory map. HTTP adds the IP window and Swagger. gRPC adds protobuf status codes and its own registry so a scrape of <code>:8000</code> cannot clobber RPC series.</p>
+<h3>HTTP vs gRPC example (same guess)</h3>
+<p>HTTP:</p>
+<pre><code class="language-http">POST /api/games/4688432cb7b1/guesses HTTP/1.1
+Content-Type: application/json
+Idempotency-Key: guess-batman-77a8b12c
+
+{&quot;name&quot;:&quot;Batman&quot;}
+</code></pre>
+<p>JSON body with seven clue objects, <code>status</code>, <code>guesses_left</code>. Roughly a few hundred bytes.</p>
+<p>gRPC:</p>
+<pre><code class="language-text">MakeGuess(game_id=&quot;4688432cb7b1&quot;, character_name=&quot;Batman&quot;, idempotency_key=&quot;grpc-guess-…&quot;)
+→ status OK, feedback fields, guesses_left
+</code></pre>
+<p>Same clues, typed fields, smaller on the wire. Failures are <code>INVALID_ARGUMENT</code> / <code>NOT_FOUND</code> instead of HTTP <code>400</code> / <code>404</code>.</p>
+<hr />
+<h2>Sources</h2>
+<ul>
+<li>ESD Lab 1 (Midnight Launch) and the week 1 gRPC workshop — compose layout, scrape jobs, proto compile command.</li>
+<li>Nygard, <em>Release It!</em> — breaker states.</li>
+<li>RFC 6585 / RFC 7231 — <code>429</code> and <code>Retry-After</code>.</li>
+</ul>
+<p>I reused the A1 app, dashboards, and chaos endpoints. New work is the spec, <code>/guesses</code>, keys, limiter, Python callers, proto + gRPC server, gRPC registry, and the comparison dashboard.</p>
+<p>Run commands live in <code>README.md</code>. Data volumes are gitignored (<code>esdata/</code>, <code>prometheus-data/</code>, etc.).</p>
+</body>
+</html>

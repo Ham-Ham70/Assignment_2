@@ -1,0 +1,301 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Secret Identity: guess the DC character</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bangers&family=Barlow:wght@500;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --cobalt: #1b3b8f;
+    --yellow: #ffd21f;
+    --red: #e5383b;
+    --paper: #fffdf6;
+    --ink: #161616;
+    --match: #2e9e5b;
+    --partial: #f2b01e;
+    --miss: #dcdce4;
+    --display: "Bangers", Impact, "Arial Narrow Bold", sans-serif;
+    --body: "Barlow", system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    font-family: var(--body);
+    font-weight: 500;
+    color: var(--paper);
+    background-color: var(--cobalt);
+    background-image: radial-gradient(rgba(255,255,255,.09) 1.5px, transparent 1.7px);
+    background-size: 14px 14px;
+  }
+  main { max-width: 1000px; margin: 0 auto; padding: 28px 16px 64px; }
+
+  h1 {
+    margin: 0;
+    font: 400 clamp(2.6rem, 8vw, 4.6rem)/1 var(--display);
+    letter-spacing: .03em;
+    color: var(--yellow);
+    -webkit-text-stroke: 2px var(--ink);
+    paint-order: stroke fill;
+    text-shadow: 4px 4px 0 var(--ink);
+  }
+  .tagline { margin: 10px 0 0; font-size: 1.05rem; max-width: 60ch; }
+
+  /* The puzzle: blanks for each letter of the secret name */
+  .blanks { display: flex; flex-wrap: wrap; gap: 12px 30px; margin: 26px 0 4px; min-height: 60px; }
+  .word { display: flex; gap: 6px; }
+  .slot {
+    width: clamp(26px, 5.5vw, 44px);
+    height: clamp(38px, 8vw, 58px);
+    border-bottom: 5px solid var(--yellow);
+    display: grid; place-items: end center;
+    font: 400 clamp(1.8rem, 5vw, 2.8rem)/1 var(--display);
+    color: var(--paper);
+  }
+  .blank-caption { margin: 0 0 22px; font-size: .95rem; opacity: .9; }
+
+  /* Guess form */
+  .panel {
+    background: var(--paper); color: var(--ink);
+    border: 3px solid var(--ink); box-shadow: 6px 6px 0 var(--ink);
+    padding: 16px;
+  }
+  form { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+  input[type=text] {
+    flex: 1 1 240px; min-width: 0;
+    font: 700 1.1rem var(--body); color: var(--ink);
+    padding: 10px 12px; border: 3px solid var(--ink); background: #fff;
+  }
+  button {
+    font: 400 1.35rem var(--display); letter-spacing: .05em;
+    padding: 8px 20px; cursor: pointer;
+    color: #fff; background: var(--red);
+    border: 3px solid var(--ink); box-shadow: 3px 3px 0 var(--ink);
+  }
+  button:active { transform: translate(2px, 2px); box-shadow: 1px 1px 0 var(--ink); }
+  button:disabled { background: #9a9aa5; cursor: not-allowed; }
+  button.secondary { background: var(--yellow); color: var(--ink); }
+  input:focus-visible, button:focus-visible { outline: 3px solid var(--cobalt); outline-offset: 2px; }
+  .status-line { display: flex; justify-content: space-between; gap: 12px; margin-top: 10px; font-weight: 700; }
+  .error { color: var(--red); min-height: 1.3em; }
+
+  /* Result banner */
+  .result {
+    margin: 18px 0 0; padding: 14px 16px;
+    border: 3px solid var(--ink); box-shadow: 6px 6px 0 var(--ink);
+    font: 400 1.7rem/1.2 var(--display); letter-spacing: .04em; color: var(--ink);
+  }
+  .result.won { background: #8fe3ae; }
+  .result.lost { background: #ffb3b3; }
+  .result[hidden] { display: none; }
+
+  /* Guess board */
+  .legend { margin: 26px 0 8px; font-size: .95rem; display: flex; flex-wrap: wrap; gap: 6px 18px; align-items: center; }
+  .chip { display: inline-block; width: 16px; height: 16px; border: 2px solid var(--ink); vertical-align: -3px; margin-right: 6px; }
+  .chip.match { background: var(--match); } .chip.partial { background: var(--partial); } .chip.miss { background: var(--miss); }
+  .scroller { overflow-x: auto; padding-bottom: 8px; }
+  .board { min-width: 780px; display: grid; gap: 6px; }
+  .row { display: grid; grid-template-columns: minmax(130px, 1.5fr) repeat(7, minmax(84px, 1fr)); gap: 6px; }
+  .head > div { font-weight: 700; font-size: .95rem; padding: 0 2px 2px; }
+  .empty { padding: 18px 4px; font-size: 1.05rem; }
+  .tile {
+    border: 3px solid var(--ink); padding: 8px 6px; min-height: 60px;
+    display: grid; place-items: center; text-align: center;
+    font-weight: 700; font-size: .92rem; line-height: 1.15;
+    background: var(--miss); color: var(--ink);
+    transform-origin: center;
+  }
+  .tile.name { background: var(--paper); font-size: 1rem; }
+  .tile.match { background: var(--match); color: #fff; }
+  .tile.partial { background: var(--partial); }
+  .arrow { display: block; font-size: .8rem; margin-top: 2px; }
+
+  /* One reveal: the newest row flips in, tile by tile, in answer to a guess */
+  .row.new .tile { animation: flip .5s both; animation-delay: calc(var(--i) * 110ms); }
+  @keyframes flip { from { transform: rotateX(90deg); opacity: 0; } to { transform: rotateX(0); opacity: 1; } }
+  @media (prefers-reduced-motion: reduce) { .row.new .tile { animation: none; } }
+</style>
+</head>
+<body>
+<main>
+  <h1>Secret Identity</h1>
+  <p class="tagline">A hero, villain or anti-hero from the DC universe is hiding. Guess characters and use the clues to close in.</p>
+
+  <div class="blanks" id="blanks" aria-label="Letters in the secret name"></div>
+  <p class="blank-caption" id="blank-caption">Starting a new game...</p>
+
+  <div class="panel">
+    <form id="guess-form" autocomplete="off">
+      <input type="text" id="guess-input" list="names" placeholder="Type a character name" aria-label="Character name" required>
+      <datalist id="names"></datalist>
+      <button type="submit" id="guess-btn">Guess</button>
+      <button type="button" id="new-btn" class="secondary">New game</button>
+    </form>
+    <div class="status-line">
+      <span class="error" id="error" role="alert"></span>
+      <span id="guesses-left"></span>
+    </div>
+  </div>
+
+  <div class="result" id="result" hidden></div>
+
+  <div class="legend">
+    <span><i class="chip match"></i>Exact match</span>
+    <span><i class="chip partial"></i>Some teams match</span>
+    <span><i class="chip miss"></i>No match</span>
+    <span>▲ the answer is higher or later &nbsp; ▼ lower or earlier</span>
+  </div>
+
+  <div class="scroller">
+    <div class="board" id="board">
+      <div class="row head">
+        <div>Character</div><div>Side</div><div>City</div><div>Origin</div><div>Gender</div><div>Teams</div><div>Debut year</div><div>Letters</div>
+      </div>
+      <div class="empty" id="empty">Pick a character above to see how close you are.</div>
+    </div>
+  </div>
+</main>
+
+<script>
+const COLUMNS = ["alignment", "city", "species", "gender", "affiliations", "debut", "letters"];
+const $ = (sel) => document.querySelector(sel);
+let game = null;
+
+async function api(path, options) {
+  const res = await fetch(path, options);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || "Something went wrong. Try again.");
+  return data;
+}
+
+function renderBlanks(lengths, answer) {
+  const box = $("#blanks");
+  box.innerHTML = "";
+  let pos = 0;
+  const letters = answer ? answer.replace(/[^A-Za-z]/g, "").toUpperCase() : "";
+  lengths.forEach((len) => {
+    const word = document.createElement("div");
+    word.className = "word";
+    for (let i = 0; i < len; i++) {
+      const slot = document.createElement("div");
+      slot.className = "slot";
+      slot.textContent = letters ? letters[pos] : "";
+      pos++;
+      word.appendChild(slot);
+    }
+    box.appendChild(word);
+  });
+  const total = lengths.reduce((a, b) => a + b, 0);
+  $("#blank-caption").textContent = `${total} letters in ${lengths.length} ${lengths.length === 1 ? "word" : "words"}`;
+}
+
+function setFinished(finished) {
+  $("#guess-input").disabled = finished;
+  $("#guess-btn").disabled = finished;
+}
+
+async function newGame() {
+  $("#error").textContent = "";
+  $("#result").hidden = true;
+  document.querySelectorAll(".row.guess").forEach((r) => r.remove());
+  $("#empty").hidden = false;
+  try {
+    const idempotencyKey = crypto.randomUUID ? crypto.randomUUID() : String(Date.now());
+    game = await api("/api/games", {
+      method: "POST",
+      headers: { "Idempotency-Key": idempotencyKey }
+    });
+  } catch (e) {
+    $("#error").textContent = e.message;
+    return;
+  }
+  renderBlanks(game.word_lengths);
+  $("#guesses-left").textContent = `${game.max_guesses} guesses left`;
+  setFinished(false);
+  $("#guess-input").value = "";
+  $("#guess-input").focus();
+}
+
+function tileFor(key, cell) {
+  const tile = document.createElement("div");
+  tile.className = `tile ${cell.status === "match" || cell.status === "partial" ? cell.status : ""}`;
+  tile.appendChild(document.createTextNode(cell.value));
+  if (cell.status === "higher" || cell.status === "lower") {
+    const arrow = document.createElement("span");
+    arrow.className = "arrow";
+    const up = cell.status === "higher";
+    arrow.textContent = up ? "▲" : "▼";
+    tile.title = up ? "The answer is higher" : "The answer is lower";
+    tile.appendChild(arrow);
+  }
+  return tile;
+}
+
+function addRow(result) {
+  $("#empty").hidden = true;
+  document.querySelectorAll(".row.new").forEach((r) => r.classList.remove("new"));
+  const row = document.createElement("div");
+  row.className = "row guess new";
+  const name = document.createElement("div");
+  name.className = "tile name";
+  name.style.setProperty("--i", 0);
+  name.textContent = result.name;
+  row.appendChild(name);
+  COLUMNS.forEach((key, i) => {
+    const tile = tileFor(key, result.feedback[key]);
+    tile.style.setProperty("--i", i + 1);
+    row.appendChild(tile);
+  });
+  // newest guess goes first, directly under the header
+  $("#board").insertBefore(row, $("#board").children[1]);
+}
+
+$("#guess-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  if (!game) return;
+  $("#error").textContent = "";
+  const name = $("#guess-input").value;
+  try {
+    const idempotencyKey = crypto.randomUUID ? crypto.randomUUID() : String(Date.now());
+    const result = await api(`/api/games/${game.game_id}/guesses`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Idempotency-Key": idempotencyKey
+      },
+      body: JSON.stringify({ name }),
+    });
+    addRow(result);
+    $("#guess-input").value = "";
+    $("#guesses-left").textContent = `${result.guesses_left} guesses left`;
+    if (result.status !== "in_progress") {
+      setFinished(true);
+      renderBlanks(game.word_lengths, result.answer);
+      const box = $("#result");
+      box.className = `result ${result.status}`;
+      box.textContent = result.status === "won"
+        ? `You got it! It was ${result.answer}.`
+        : `Out of guesses. It was ${result.answer}.`;
+      box.hidden = false;
+    }
+  } catch (e) {
+    $("#error").textContent = e.message;
+  }
+});
+
+$("#new-btn").addEventListener("click", newGame);
+
+(async function init() {
+  try {
+    const names = await api("/api/characters");
+    const list = $("#names");
+    names.forEach((n) => { const o = document.createElement("option"); o.value = n; list.appendChild(o); });
+  } catch (e) { /* autocomplete is optional */ }
+  newGame();
+})();
+</script>
+</body>
+</html>

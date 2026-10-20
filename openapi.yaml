@@ -1,0 +1,326 @@
+openapi: 3.0.3
+info:
+  title: Secret Identity API
+  description: >
+    HTTP API for the DC character guessing game. Start a session, list names,
+    submit guesses, and inspect status. Guesses are rate-limited. Start-game
+    and guess accept an optional Idempotency-Key so a retry does not spend
+    an extra turn or create a second game.
+  version: 2.0.0
+servers:
+  - url: http://localhost:8000
+    description: Local development / Docker container server
+
+paths:
+  /api/health:
+    get:
+      summary: Liveness and readiness health probe
+      description: Returns service operational status.
+      responses:
+        '200':
+          description: Service is healthy.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+
+  /api/characters:
+    get:
+      summary: List all characters
+      description: Returns a sorted list of all guessable DC character names in the catalog.
+      responses:
+        '200':
+          description: Array of character names.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: string
+                example: ["Aquaman", "Batman", "Flash", "Superman", "Wonder Woman"]
+
+  /api/games:
+    post:
+      summary: Start a new game session
+      description: >
+        Picks a secret character at random and initializes a new game session.
+        Supports safe retries using the Idempotency-Key header.
+      parameters:
+        - in: header
+          name: Idempotency-Key
+          schema:
+            type: string
+          required: false
+          description: Unique client token to guarantee idempotent game initialization.
+      responses:
+        '201':
+          description: New game session initialized.
+          headers:
+            Idempotent-Replayed:
+              schema:
+                type: boolean
+              description: True if response was served from cache for a replayed request.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  game_id:
+                    type: string
+                    example: "4b9e28f1c012"
+                  max_guesses:
+                    type: integer
+                    example: 8
+                  word_lengths:
+                    type: array
+                    items:
+                      type: integer
+                    example: [6]
+                  idempotent_replayed:
+                    type: boolean
+                    example: false
+
+  /api/games/{gameId}/guesses:
+    post:
+      summary: Submit a character guess
+      description: >
+        Evaluates a submitted guess against the secret character, providing
+        comparative feedback across 7 attributes. Throttled via rate limiting.
+        Supports safe idempotent repeats via Idempotency-Key header.
+      parameters:
+        - in: path
+          name: gameId
+          required: true
+          schema:
+            type: string
+          description: Unique game session ID.
+        - in: header
+          name: Idempotency-Key
+          required: false
+          schema:
+            type: string
+          description: Optional idempotency key to prevent duplicate turn penalty upon network retry.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - name
+              properties:
+                name:
+                  type: string
+                  example: "Batman"
+      responses:
+        '200':
+          description: Guess evaluated successfully.
+          headers:
+            Idempotent-Replayed:
+              schema:
+                type: boolean
+              description: Set to true if this request was replayed and served from idempotency cache.
+            X-RateLimit-Limit:
+              schema:
+                type: integer
+              description: Allowed request quota in the current window.
+            X-RateLimit-Remaining:
+              schema:
+                type: integer
+              description: Remaining quota in the current window.
+            X-RateLimit-Reset:
+              schema:
+                type: integer
+              description: Unix timestamp when the rate limit window resets.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  name:
+                    type: string
+                    example: "Batman"
+                  feedback:
+                    type: object
+                    description: Attribute-by-attribute comparison against the secret character.
+                    properties:
+                      alignment:
+                        $ref: '#/components/schemas/AttributeFeedback'
+                      city:
+                        $ref: '#/components/schemas/AttributeFeedback'
+                      species:
+                        $ref: '#/components/schemas/AttributeFeedback'
+                      gender:
+                        $ref: '#/components/schemas/AttributeFeedback'
+                      affiliations:
+                        $ref: '#/components/schemas/AttributeFeedback'
+                      debut:
+                        $ref: '#/components/schemas/AttributeFeedback'
+                      letters:
+                        $ref: '#/components/schemas/AttributeFeedback'
+                  status:
+                    type: string
+                    enum: [in_progress, won, lost]
+                    example: "in_progress"
+                  guesses_used:
+                    type: integer
+                    example: 1
+                  guesses_left:
+                    type: integer
+                    example: 7
+                  answer:
+                    type: string
+                    description: Revealed secret character name when status is won or lost.
+                    example: "Nightwing"
+                  idempotent_replayed:
+                    type: boolean
+                    example: false
+        '400':
+          description: Bad request (unknown character or invalid body).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Game session not found or expired.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Conflict (game is already won or lost).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          description: Too many requests (rate limit exceeded).
+          headers:
+            Retry-After:
+              schema:
+                type: integer
+              description: Minimum seconds the caller must wait before retrying.
+            X-RateLimit-Limit:
+              schema:
+                type: integer
+            X-RateLimit-Remaining:
+              schema:
+                type: integer
+                example: 0
+            X-RateLimit-Reset:
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  detail:
+                    type: string
+                    example: "Too Many Requests. Limit is 5 requests per 10s."
+                  retry_after:
+                    type: integer
+                    example: 8
+
+  /api/games/{gameId}:
+    get:
+      summary: Inspect game session status
+      description: Returns the status and guess history for a given game ID.
+      parameters:
+        - in: path
+          name: gameId
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Game status retrieved.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  game_id:
+                    type: string
+                  status:
+                    type: string
+                    enum: [in_progress, won, lost]
+                  guesses_used:
+                    type: integer
+                  guesses_left:
+                    type: integer
+                  guesses:
+                    type: array
+                    items:
+                      type: string
+        '404':
+          description: Game not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /metrics:
+    get:
+      summary: Prometheus exposition endpoint
+      description: Exposes Prometheus-formatted metrics for scraping.
+      responses:
+        '200':
+          description: Text-formatted Prometheus metrics.
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /chaos/delay:
+    post:
+      summary: Inject artificial latency
+      description: Causes every Nth request to sleep for M milliseconds.
+      parameters:
+        - in: query
+          name: every
+          schema:
+            type: integer
+            default: 0
+        - in: query
+          name: ms
+          schema:
+            type: integer
+            default: 0
+      responses:
+        '200':
+          description: Latency rule applied.
+        '400':
+          description: Invalid parameters.
+
+  /chaos/reset:
+    post:
+      summary: Reset all injected chaos
+      description: Clears delay and fault injection settings.
+      responses:
+        '200':
+          description: Chaos settings reset.
+
+components:
+  schemas:
+    AttributeFeedback:
+      type: object
+      properties:
+        value:
+          type: string
+          example: "Hero"
+        status:
+          type: string
+          enum: [match, miss, partial, higher, lower]
+          example: "match"
+
+    ErrorResponse:
+      type: object
+      properties:
+        detail:
+          type: string
+          example: "Pick a character from the DC roster list."

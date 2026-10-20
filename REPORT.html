@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Assignment 1 — Observability Report (Secret Identity)</title>
+<style>
+  @page { size: A4; margin: 18mm 16mm; }
+  * { box-sizing: border-box; }
+  body {
+    font-family: "Segoe UI", Calibri, Arial, sans-serif;
+    font-size: 11pt;
+    line-height: 1.45;
+    color: #1a1a1a;
+    max-width: 820px;
+    margin: 0 auto;
+    padding: 24px 12px 48px;
+  }
+  h1 { font-size: 20pt; margin: 0 0 6px; }
+  h2 {
+    font-size: 14pt;
+    margin: 28px 0 10px;
+    padding-bottom: 4px;
+    border-bottom: 1.5px solid #333;
+    page-break-after: avoid;
+  }
+  h3 { font-size: 12pt; margin: 18px 0 8px; page-break-after: avoid; }
+  p { margin: 0 0 10px; }
+  ul, ol { margin: 0 0 10px; padding-left: 22px; }
+  li { margin-bottom: 3px; }
+  code, pre {
+    font-family: Consolas, "Courier New", monospace;
+    font-size: 9.5pt;
+  }
+  code { background: #f3f3f3; padding: 1px 4px; border-radius: 3px; }
+  pre {
+    background: #f5f5f5;
+    border: 1px solid #ddd;
+    padding: 10px 12px;
+    overflow-x: auto;
+    white-space: pre-wrap;
+    page-break-inside: avoid;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 9.5pt;
+    margin: 0 0 12px;
+    page-break-inside: avoid;
+  }
+  th, td {
+    border: 1px solid #ccc;
+    padding: 5px 7px;
+    text-align: left;
+    vertical-align: top;
+  }
+  th { background: #eee; }
+  figure {
+    margin: 12px 0 18px;
+    page-break-inside: avoid;
+  }
+  figure img {
+    display: block;
+    max-width: 100%;
+    height: auto;
+    border: 1px solid #ccc;
+  }
+  figcaption {
+    font-size: 9.5pt;
+    color: #444;
+    margin-top: 6px;
+    font-style: italic;
+  }
+  .meta { color: #444; margin-bottom: 18px; }
+  .meta strong { color: #111; }
+  .note { font-size: 10pt; color: #555; }
+  hr { border: none; border-top: 1px solid #ccc; margin: 22px 0; }
+</style>
+</head>
+<body>
+
+<h1>Assignment 1 — Observability Report</h1>
+<p class="meta">
+  <strong>Secret Identity</strong><br />
+  Enterprise Software Development, Fall 2026<br />
+  <strong>Name:</strong> Syed Hamza Omer<br />
+  <strong>Student ID:</strong> 08962
+</p>
+
+<h2>Part A — Project</h2>
+<p><strong>Problem.</strong> I wanted a short browser game in the style of Wordle, but for DC characters instead of letters. Players get attribute clues after each guess and try to find the secret character before they run out of attempts.</p>
+<p><strong>Users.</strong> Anyone who knows comic characters roughly and wants a quick round — no account, no install.</p>
+<p><strong>Solution.</strong> A single Node/Express app (<code>app/server.js</code>). The server picks a character from <code>characters.json</code>, keeps the answer, and returns match / partial / higher / lower feedback per attribute. Games end on a correct guess or after 8 tries.</p>
+<p><strong>How to try it</strong></p>
+<pre>docker compose up -d --build
+# then open http://localhost:8000
+# optional load: node scripts/load.js --duration 60</pre>
+<p>What works: new games, guesses with feedback, win/lose, Prometheus <code>/metrics</code>, JSON logs on stdout, and the chaos endpoints used in Part E.</p>
+
+<h2>Part B — Metrics</h2>
+<p>Prometheus scrapes the app every 5s. Grafana shows the charts below. Node Exporter scrapes the <strong>Docker Desktop Linux VM</strong>, labeled <code>machine="docker-desktop-linux-vm"</code>.</p>
+
+<h3>Metric list</h3>
+<table>
+  <thead>
+    <tr><th>Metric</th><th>Purpose</th><th>Type</th><th>Unit</th><th>Labels</th><th>Where</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><code>http_requests_total</code></td><td>Request volume / failures</td><td>Counter</td><td>requests</td><td>method, route, status_code</td><td>Request middleware</td></tr>
+    <tr><td><code>http_request_duration_seconds</code></td><td>Latency / p95</td><td>Histogram</td><td>seconds</td><td>method, route</td><td>Same middleware</td></tr>
+    <tr><td><code>games_active</code></td><td>Games in progress</td><td>Gauge</td><td>games</td><td>—</td><td>Gauge collect()</td></tr>
+    <tr><td><code>guesses_per_game</code></td><td>Guesses when a game ends</td><td>Summary</td><td>guesses</td><td>result</td><td>On win/loss (~10 min)</td></tr>
+    <tr><td><code>games_started_total</code> / <code>games_finished_total</code></td><td>Business volume</td><td>Counter</td><td>games</td><td>result on finished</td><td>Game routes</td></tr>
+    <tr><td><code>guesses_by_character_total</code></td><td>Most guessed characters (my own)</td><td>Counter</td><td>guesses</td><td>character</td><td>Accepted guess</td></tr>
+    <tr><td><code>demo_requests_total</code></td><td>Cardinality demo</td><td>Counter</td><td>requests</td><td>optional request_id</td><td><code>/api/demo/hit</code></td></tr>
+    <tr><td><code>node_*</code></td><td>CPU, memory, disk, network</td><td>various</td><td>various</td><td>machine</td><td>Node Exporter</td></tr>
+  </tbody>
+</table>
+<p class="note">All four Prometheus types are used across the project (not four of each category).</p>
+
+<figure>
+  <img src="report-images/b-dashboard-list.png" alt="Grafana dashboard list" />
+  <figcaption>Figure B.1 — Grafana dashboards for each metric type plus Node Exporter Full.</figcaption>
+</figure>
+
+<h3>Application metrics</h3>
+<p><strong>Counter — RPS by route</strong></p>
+<pre>sum by (route) (rate(http_requests_total[1m]))</pre>
+<figure>
+  <img src="report-images/b-rps.png" alt="RPS chart" />
+  <figcaption>Figure B.2 — Requests/sec during load. Guess traffic dominates.</figcaption>
+</figure>
+
+<p><strong>Counter — failed requests</strong></p>
+<pre>sum by (status_code) (rate(http_requests_total{status_code!~"2.."}[1m]))</pre>
+<figure>
+  <img src="report-images/b-failed-rps.png" alt="Failed RPS" />
+  <figcaption>Figure B.3 — Non-2xx traffic (e.g. bad guesses → 400).</figcaption>
+</figure>
+
+<p>Raw samples from <code>/metrics</code>:</p>
+<figure>
+  <img src="report-images/b-raw-metrics.png" alt="Raw Prometheus metrics" />
+  <figcaption>Figure B.4 — What Prometheus scrapes for <code>http_requests_total</code>.</figcaption>
+</figure>
+
+<p><strong>Histogram — p95 latency</strong> (5m rate window for the quantile estimate):</p>
+<pre>histogram_quantile(0.95, sum by (le, route) (rate(http_request_duration_seconds_bucket[5m])))</pre>
+<figure>
+  <img src="report-images/b-histogram.png" alt="p95 histogram" />
+  <figcaption>Figure B.5 — p95 by route under normal play.</figcaption>
+</figure>
+
+<h3>Business metrics</h3>
+<p><strong>Gauge — active games:</strong> <code>games_active</code></p>
+<figure>
+  <img src="report-images/b-gauge.png" alt="Active games gauge" />
+  <figcaption>Figure B.6 — In-progress games during a load run.</figcaption>
+</figure>
+
+<p><strong>Summary — average</strong> (window ~10 minutes via <code>maxAgeSeconds: 600</code>):</p>
+<pre>sum(rate(guesses_per_game_sum[10m])) / sum(rate(guesses_per_game_count[10m]))</pre>
+<figure>
+  <img src="report-images/b-summary-avg.png" alt="Summary average" />
+  <figcaption>Figure B.7 — Average guesses per finished game.</figcaption>
+</figure>
+
+<p><strong>Summary — median (p50):</strong> <code>guesses_per_game{quantile="0.5"}</code></p>
+<figure>
+  <img src="report-images/b-summary-p50.png" alt="Summary p50" />
+  <figcaption>Figure B.8 — Median guesses. Lost games sit at 8; wins are lower.</figcaption>
+</figure>
+
+<h3>Metric I explored myself</h3>
+<p><code>guesses_by_character_total</code> — which characters players try most. Label set is bounded by the roster size.</p>
+<pre>topk(10, sum by (character) (guesses_by_character_total))</pre>
+<figure>
+  <img src="report-images/b-characters.png" alt="Most guessed characters timeseries" />
+  <figcaption>Figure B.9 — Top guessed characters over time.</figcaption>
+</figure>
+<figure>
+  <img src="report-images/b-characters-stat.png" alt="Most guessed characters stat panel" />
+  <figcaption>Figure B.10 — Stat view of the same leaderboard.</figcaption>
+</figure>
+
+<h3>Node Exporter</h3>
+<p>Machine name: <strong>docker-desktop-linux-vm</strong>. I imported the community Node Exporter Full dashboard for CPU, memory, disk, and network.</p>
+<figure>
+  <img src="report-images/b-node-exporter.png" alt="Node Exporter dashboard" />
+  <figcaption>Figure B.11 — Host/VM overview from Node Exporter.</figcaption>
+</figure>
+
+<h2>Part C — Logs</h2>
+<h3>What I log</h3>
+<table>
+  <thead><tr><th>Event</th><th>Why</th><th>Where</th></tr></thead>
+  <tbody>
+    <tr><td><code>request completed</code></td><td>method, route, status, duration_ms, request_id</td><td>Middleware</td></tr>
+    <tr><td>game started / guess made / game finished</td><td>Business trail without leaking the secret mid-game</td><td>Game routes</td></tr>
+    <tr><td>guess rejected</td><td>Bad / unknown / duplicate guesses</td><td>Guess validation</td></tr>
+    <tr><td>chaos delay injected</td><td>Part E fault visibility</td><td>Chaos middleware</td></tr>
+    <tr><td>errors</td><td>Unexpected failures</td><td>Error handler</td></tr>
+  </tbody>
+</table>
+<p>I do <strong>not</strong> log IPs, user-agents, passwords, or the secret while a game is running.</p>
+
+<h3>Pipeline</h3>
+<p>App JSON on stdout → Docker container logs → Filebeat (containers labeled <code>co.elastic.logs/enabled=true</code>; decode JSON) → Elasticsearch <code>secret-identity-logs-*</code> → Kibana Discover. Config: <code>filebeat/filebeat.yml</code> (same pattern as Lab 1).</p>
+
+<h3>Where logs live</h3>
+<table>
+  <thead><tr><th>Place</th><th>Survives restart?</th><th>Cleared by</th></tr></thead>
+  <tbody>
+    <tr><td>Docker container logs</td><td>Until rotate/remove</td><td>Docker log rotation</td></tr>
+    <tr><td>Elasticsearch <code>esdata</code> volume</td><td>Yes</td><td><code>docker compose down -v</code></td></tr>
+    <tr><td>Filebeat registry</td><td>Yes</td><td><code>down -v</code></td></tr>
+  </tbody>
+</table>
+<p>ILM is off here, so indices stay until the volume is removed.</p>
+
+<h3>Searching</h3>
+<p>Data view <code>secret-identity-logs-*</code>, timestamp <code>@timestamp</code>.</p>
+<p>Example original stdout line:</p>
+<pre>{"level":"info","service":"secret-identity","request_id":"…","method":"POST","route":"/api/games","status_code":200,"duration_ms":3.2,"message":"request completed","@timestamp":"2026-09-23T11:00:00.000Z"}</pre>
+<figure>
+  <img src="report-images/c-kibana-discover.png" alt="Kibana Discover" />
+  <figcaption>Figure C.1 — Kibana Discover (504 documents in 15 minutes during load).</figcaption>
+</figure>
+<p>Useful KQL: <code>service: "secret-identity"</code>, <code>request_id: "…"</code>, <code>level: error or level: warn</code>, <code>message: "chaos delay injected"</code>.</p>
+
+<h2>Part D — System design</h2>
+<h3>Architecture</h3>
+<pre>
+Browser / scripts
+        │ HTTP
+        ▼
+secret-identity-app :8000 ──stdout JSON──► Docker log files
+        ▲                                      │
+        │ scrape /metrics (5s)                 │ read + decode
+        │                                      ▼
+   Prometheus :9090 ◄── scrape ── Node Exporter    Filebeat
+        │                                      │
+        │ PromQL                               │ index
+        ▼                                      ▼
+   Grafana :3000                         Elasticsearch :9200
+                                               │
+                                               ▼
+                                          Kibana :5601
+</pre>
+<table>
+  <thead><tr><th>If this stops…</th><th>What happens</th></tr></thead>
+  <tbody>
+    <tr><td>App</td><td>Players fail; metrics/logs go stale</td></tr>
+    <tr><td>Prometheus / Grafana</td><td>Game still works; charts empty/stale</td></tr>
+    <tr><td>Filebeat</td><td>Logs stay on disk only</td></tr>
+    <tr><td>Elasticsearch</td><td>Kibana cannot search; Filebeat retries</td></tr>
+    <tr><td>Kibana</td><td>Data still in ES</td></tr>
+  </tbody>
+</table>
+<p>Metrics want low-cardinality numbers; logs can carry high-cardinality fields like <code>request_id</code>. I am not claiming to know every line of Prometheus/Filebeat internals — mainly how they connect in this compose setup.</p>
+
+<h3>Follow a metric</h3>
+<p><code>http_request_duration_seconds</code>: middleware starts a timer → <code>/metrics</code> → Prometheus scrape → Grafana p95 query (Figures B.4–B.5; spike again in Part E).</p>
+
+<h3>Follow a log</h3>
+<p><code>request completed</code> on stdout → Filebeat decode → ES → Kibana with <code>request_id</code> or <code>message: "request completed"</code> (Figure C.1).</p>
+
+<h2>Part E — Experiments</h2>
+<h3>E.1 Slow requests</h3>
+<p><strong>Fault:</strong> every 5th request sleeps 500 ms (<code>POST /chaos/delay?every=5&amp;ms=500</code>).</p>
+<p><strong>Prediction:</strong> p95 rises; warn logs <code>chaos delay injected</code>; players feel intermittent lag.</p>
+<p><strong>Method:</strong> <code>node scripts/experiment-delay.js</code> (baseline → inject → recover).</p>
+<table>
+  <thead><tr><th>Stage</th><th>p95 (approx., start-game route)</th></tr></thead>
+  <tbody>
+    <tr><td>Baseline</td><td>~5 ms</td></tr>
+    <tr><td>Delay on</td><td>~853 ms</td></tr>
+    <tr><td>After recover</td><td>~5 ms</td></tr>
+  </tbody>
+</table>
+<figure>
+  <img src="report-images/e-delay-p95.png" alt="p95 during delay experiment" />
+  <figcaption>Figure E.1 — p95 spike while delay was active, then recovery. Game routes move together; health stays flat.</figcaption>
+</figure>
+<p><strong>Cause / users:</strong> artificial sleep before handling, so about 1 in 5 actions feels slow. Clearing delay restores normal latency.</p>
+
+<h3>E.2 Cardinality</h3>
+<p>With <code>ENABLE_CARDINALITY_LABEL=1</code>, <code>demo_requests_total</code> gets a <code>request_id</code> label. After 100 unique hits:</p>
+<table>
+  <thead><tr><th>Mode</th><th><code>count(demo_requests_total)</code></th></tr></thead>
+  <tbody>
+    <tr><td>With <code>request_id</code> label</td><td><strong>100</strong></td></tr>
+    <tr><td>Label removed + restart</td><td><strong>1</strong></td></tr>
+  </tbody>
+</table>
+<p>At scale, unbounded labels create too many series and hurt Prometheus. IDs belong in logs, not metric labels. Old series can linger in history after the label is removed.</p>
+
+<hr />
+<p><strong>Sources.</strong> ESD Lab 1 (Midnight Launch) for the logging pipeline pattern; Prometheus label guidance; Grafana Node Exporter Full (rfmoz); Cursor assistance for compose/scripts wiring.</p>
+<p class="note">Code, configs, dashboards, and README are in the Assignment_1 project folder.</p>
+
+</body>
+</html>

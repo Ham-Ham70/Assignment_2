@@ -1,0 +1,106 @@
+syntax = "proto3";
+
+package secretidentity;
+
+option java_multiple_files = true;
+option java_package = "com.secretidentity.grpc";
+option java_outer_classname = "GameProto";
+
+// Same game as the HTTP API, over protobuf.
+service SecretIdentityService {
+  rpc GetCharacters (GetCharactersRequest) returns (GetCharactersResponse);
+  rpc StartGame (StartGameRequest) returns (StartGameResponse);
+  rpc MakeGuess (MakeGuessRequest) returns (MakeGuessResponse);
+  rpc GetGameStatus (GetGameStatusRequest) returns (GetGameStatusResponse);
+}
+
+// Request to list characters
+message GetCharactersRequest {
+  // Optional filter: "Hero", "Anti-hero", "Villain", or empty for all
+  string alignment_filter = 1;
+}
+
+// Response containing character list
+message GetCharactersResponse {
+  repeated Character characters = 1;
+  int32 total_count = 2;
+}
+
+// Full character record
+message Character {
+  string name = 1;
+  string alignment = 2;
+  string city = 3;
+  string species = 4;
+  string gender = 5;
+  repeated string affiliations = 6;
+  int32 debut = 7;
+}
+
+// Request to start a new game session
+message StartGameRequest {
+  // Optional client-provided idempotency key
+  string idempotency_key = 1;
+  // Optional player or client identifier for audit logging
+  string client_id = 2;
+}
+
+// Response with new game session details
+message StartGameResponse {
+  string game_id = 1;
+  int32 max_guesses = 2;
+  repeated int32 word_lengths = 3;
+}
+
+// Request to make a guess in a game
+message MakeGuessRequest {
+  string game_id = 1;
+  string character_name = 2;
+  // Optional idempotency key to protect against duplicate turn consumption
+  string idempotency_key = 3;
+}
+
+// Attribute feedback for a guess
+message AttributeComparison {
+  string value = 1;
+  // "match", "miss", "partial", "higher", "lower"
+  string status = 2;
+}
+
+// Feedback comparing guess against the secret character
+message GuessFeedback {
+  AttributeComparison alignment = 1;
+  AttributeComparison city = 2;
+  AttributeComparison species = 3;
+  AttributeComparison gender = 4;
+  AttributeComparison affiliations = 5;
+  AttributeComparison debut = 6;
+  AttributeComparison letters = 7;
+}
+
+// Response returning feedback and updated game status
+message MakeGuessResponse {
+  string character_name = 1;
+  GuessFeedback feedback = 2;
+  // "in_progress", "won", "lost"
+  string game_status = 3;
+  int32 guesses_left = 4;
+  int32 guesses_used = 5;
+  // Answer revealed only when game is won or lost
+  string secret_answer = 6;
+  bool idempotent_replayed = 7;
+}
+
+// Request to get status of an existing game
+message GetGameStatusRequest {
+  string game_id = 1;
+}
+
+// Response with current status of a game
+message GetGameStatusResponse {
+  string game_id = 1;
+  string status = 2;
+  int32 guesses_used = 3;
+  int32 guesses_left = 4;
+  repeated string guesses = 5;
+}

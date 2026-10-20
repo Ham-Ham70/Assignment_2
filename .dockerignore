@@ -1,0 +1,6 @@
+node_modules
+npm-debug.log
+.git
+REPORT.md
+*.md
+grafana/exports_grafana13

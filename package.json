@@ -1,0 +1,20 @@
+{
+  "name": "secret-identity",
+  "version": "1.0.0",
+  "description": "Wordle-style guessing game for DC characters",
+  "main": "app/server.js",
+  "scripts": {
+    "start": "node app/server.js",
+    "dev": "node --watch app/server.js",
+    "load": "node scripts/load.js",
+    "experiment:delay": "node scripts/experiment-delay.js",
+    "experiment:cardinality": "node scripts/experiment-cardinality.js"
+  },
+  "dependencies": {
+    "@grpc/grpc-js": "^1.14.6",
+    "@grpc/proto-loader": "^0.8.1",
+    "express": "^4.19.2",
+    "pino": "^10.3.1",
+    "prom-client": "^15.1.3"
+  }
+}
