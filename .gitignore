@@ -10,3 +10,10 @@ esdata/
 filebeat-data/
 prometheus-data/
 data/
+node_modules/
+__pycache__/
+esdata/
+prometheus-data/
+filebeat-data/
+*.zip
+*.mp4
